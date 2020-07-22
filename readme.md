@@ -32,7 +32,7 @@ def MakeStr(ea, endea): return create_strlit(ea, endea)
 
 * 快速设置函数
 
-![](https://i.loli.net/2020/07/22/IgYSLkdhZbJyGpu.gif)
+![](https://i.loli.net/2020/07/22/mwXqKR8fHZcpbgT.gif)
 
 * 设置字符串
 
