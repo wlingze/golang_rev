@@ -6,19 +6,45 @@
 #
 # Distributed under terms of the MIT license.
 
+import idc
 import idaapi
 import idautils
-import idc
+import ida_bytes
+import ida_name
 
-
-GOLANG_FUNC    = "golang_rev:golang_func"
-GOLANG_STRING  = "golang_rev:golang_string"
+GOLANG_FUNC = "golang_rev:golang_func"
+GOLANG_STRING = "golang_rev:golang_string"
 RENAME_POINTER = 'golang_rev:rename_pointer'
+
+if idaapi.IDA_SDK_VERSION < 740:
+    Qword = idc.Qword
+    MakeQword = idc.MakeQword
+    MakeStr = idc.MakeStr
+    MakeName = idc.MakeName
+    Name = idc.Name
+    Dword = idc.Dword
+    GetString = idc.GetString
+else:
+    Qword = ida_bytes.get_qword
+    Dword = ida_bytes.get_dword
+    MakeQword = idc.create_qword
+    MakeStr = idc.create_strlit
+
+    def MakeName(ea, name):
+        return idc.set_name(ea, name, ida_name.SN_CHECK)
+
+    def Name(ea):
+        return idc.get_name(ea, ida_name.GN_VISIBLE)
+
+    def GetString(ea, length=-1, strtype=0):
+        return idc.get_strlit_contents(ea, length, strtype).decode()
+
 
 class menu_action_handler_t(idaapi.action_handler_t):
     """
     Action handler for menu actions
     """
+
     def __init__(self, action):
         idaapi.action_handler_t.__init__(self)
         self.action = action
@@ -31,43 +57,55 @@ class menu_action_handler_t(idaapi.action_handler_t):
         elif self.action == RENAME_POINTER:
             self.rename_pointer()
         else:
-            return 0 
+            return 0
         return 1
 
     def update(self, ctx):
         return idaapi.AST_ENABLE_ALWAYS
-    
+
     def set_string(self):
         start = idc.here()
         str_len = idaapi.ask_long(0, "string len...")
         if str_len:
-            idc.MakeStr(start, start + str_len)
+            MakeStr(start, start + str_len)
         return 1
 
     def rename_pointer(self):
-        name = 'p_{}'.format(idc.Name(idc.Qword(idc.here())))
-        idc.MakeName(idc.here(), name)
+        name = 'p_{}'.format(Name(Qword(idc.here())))
+        MakeName(idc.here(), name)
 
     def set_function(self):
-        try: 
-            base  = idautils.ida_segment.get_segm_by_name('.gopclntab').start_ea
+        try:
+            base = idautils.ida_segment.get_segm_by_name('.gopclntab').start_ea
         except:
             print("Cannot get segment .gopclntab!")
             return 0
-        ea    = base + 8
-        len   = idc.Qword(ea) * 8 * 2
-        ptr   = base + 8 + 8
-        end   = base + len
+        ea = base + 8
+        len = Qword(ea) * 8 * 2
+        ptr = base + 8 + 8
+        end = base + len
         while ptr <= end:
-            idc.MakeQword(ptr)
-            func_addr = idc.Qword(ptr)
-            idc.MakeQword(ptr + 8)
-            name_offset = idc.Qword(ptr + 8)
-            name_addr   = idc.Dword(base + 8 + name_offset) + base
-            name        = idc.GetString(name_addr)
-            name = name.replace('.','_').replace("<-",'_chan_left_').replace('*','_ptr_').replace('-','_').replace(';','').replace('"','').replace('\\\\','')
-            name = name.replace('(','').replace(')','').replace('/','_').replace(' ','_').replace(',','comma').replace('{','').replace('}','')
-            idc.MakeName(func_addr, name)
+            MakeQword(ptr)
+            func_addr = Qword(ptr)
+            MakeQword(ptr + 8)
+            name_offset = Qword(ptr + 8)
+            name_addr = Dword(base + 8 + name_offset) + base
+            name = GetString(name_addr)
+            name = name.replace('.', '_') \
+                .replace("<-", '_chan_left_') \
+                .replace('*', '_ptr_') \
+                .replace('-', '_') \
+                .replace(';', '') \
+                .replace('"', '') \
+                .replace('\\\\', '')
+            name = name.replace('(', '') \
+                .replace(')', '') \
+                .replace('/', '_') \
+                .replace(' ', '_') \
+                .replace(',', 'comma') \
+                .replace('{', '') \
+                .replace('}', '')
+            MakeName(func_addr, name)
             print(name)
             print(ptr)
             ptr += 16
@@ -83,18 +121,20 @@ class UI_Hook(idaapi.UI_Hooks):
         form_type = idaapi.get_widget_type(form)
 
         if form_type == idaapi.BWN_DISASM or form_type == idaapi.BWN_DUMP:
-            t0, t1, view = idaapi.twinpos_t(), idaapi.twinpos_t(), idaapi.get_current_viewer()
-            if idaapi.read_selection(view, t0, t1) or idc.get_item_size(idc.get_screen_ea()) > 1:
+            t0, t1, view = idaapi.twinpos_t(), idaapi.twinpos_t(
+            ), idaapi.get_current_viewer()
+            if idaapi.read_selection(view, t0, t1) \
+                    or idc.get_item_size(idc.get_screen_ea()) > 1:
                 idaapi.attach_action_to_popup(form, popup, GOLANG_FUNC, None)
                 idaapi.attach_action_to_popup(form, popup, GOLANG_STRING, None)
-                idaapi.attach_action_to_popup(form, popup, RENAME_POINTER, None)
-
+                idaapi.attach_action_to_popup(form, popup, RENAME_POINTER,
+                                              None)
 
 
 class Golang_Rev(idaapi.plugin_t):
     flags = idaapi.PLUGIN_UNL
     comment = "Golang_Rev"
- 
+
     help = ""
     wanted_name = "Golang_Rev"
     wanted_hotkey = ""
@@ -119,9 +159,15 @@ class Golang_Rev(idaapi.plugin_t):
 
         # Register menu actions
         menu_actions = (
-            idaapi.action_desc_t(GOLANG_STRING, "Set golang string", menu_action_handler_t(GOLANG_STRING), None, None, 9),
-            idaapi.action_desc_t(GOLANG_FUNC, "Set golang function", menu_action_handler_t(GOLANG_FUNC), None, None, 9),
-            idaapi.action_desc_t(RENAME_POINTER, "Set pointer", menu_action_handler_t(RENAME_POINTER), None, None, 9),
+            idaapi.action_desc_t(GOLANG_STRING, "Set golang string",
+                                 menu_action_handler_t(GOLANG_STRING), None,
+                                 None, 9),
+            idaapi.action_desc_t(GOLANG_FUNC, "Set golang function",
+                                 menu_action_handler_t(GOLANG_FUNC), None,
+                                 None, 9),
+            idaapi.action_desc_t(RENAME_POINTER, "Set pointer",
+                                 menu_action_handler_t(RENAME_POINTER), None,
+                                 None, 9),
         )
         for action in menu_actions:
             idaapi.register_action(action)
@@ -143,7 +189,6 @@ class Golang_Rev(idaapi.plugin_t):
         # Unregister actions
         for action in self.registered_actions:
             idaapi.unregister_action(action)
-
 
 
 def PLUGIN_ENTRY():
